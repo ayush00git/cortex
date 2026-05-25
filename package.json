@@ -1,0 +1,24 @@
+{
+  "name": "seam-ai",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@llamaindex/google": "^0.4.0",
+    "@llamaindex/qdrant": "^0.1.32",
+    "@llamaindex/readers": "^3.1.21",
+    "@qdrant/js-client-rest": "^1.18.0",
+    "dotenv": "^17.4.2",
+    "llamaindex": "^0.12.1"
+  }
+}
