@@ -12,13 +12,21 @@ import "dotenv/config";
 
 // Reads a folder into Document objects (text + metadata like file_name).
 import { SimpleDirectoryReader } from "@llamaindex/readers/directory";
-import { VectorStoreIndex, storageContextFromDefaults } from "llamaindex";
+// DocStoreStrategy controls what happens when we ingest a document we've seen
+// before. UPSERTS_AND_DELETE = skip unchanged docs, re-embed changed ones, and
+// delete the vectors of docs that were removed from ./documents/.
+import {
+  VectorStoreIndex,
+  storageContextFromDefaults,
+  DocStoreStrategy,
+} from "llamaindex";
 import { QdrantVectorStore } from "@llamaindex/qdrant";
 import {
   initSettings,
   COLLECTION_NAME,
   QDRANT_URL,
   DOCUMENTS_DIR,
+  STORAGE_DIR,
 } from "./settings.js";
 
 export async function ingest(): Promise<void> {
@@ -46,17 +54,30 @@ export async function ingest(): Promise<void> {
     collectionName: COLLECTION_NAME,
   });
 
-  // Routes the index's vectors to Qdrant instead of the default in-memory store
-  // (which would vanish on exit).
-  const storageContext = await storageContextFromDefaults({ vectorStore });
+  // Routes vectors to Qdrant, and persists the docstore (the per-document hash
+  // record) to STORAGE_DIR. The persisted docstore is what makes re-runs
+  // incremental: on the next run it is reloaded and used to tell which
+  // documents are unchanged.
+  const storageContext = await storageContextFromDefaults({
+    vectorStore,
+    persistDir: STORAGE_DIR,
+  });
 
   // fromDocuments does three things: chunk each document into passages, embed
   // each chunk via Gemini (the API calls happen here), and store every
   // (chunk + vector + metadata) row in Qdrant. logProgress prints a counter.
+  //
+  // docStoreStrategy makes this idempotent: documents whose hash already exists
+  // in the docstore are skipped (not re-embedded), changed documents are
+  // re-embedded with their old vectors deleted first, and documents removed
+  // from disk have their vectors deleted. So running ingest twice no longer
+  // duplicates data. NOTE: granularity is per-document - any change to a
+  // document re-embeds all of its chunks, not just the edited lines.
   console.log("[ingest] Chunking, embedding with Gemini, and storing in Qdrant ...");
   await VectorStoreIndex.fromDocuments(documents, {
     storageContext,
     logProgress: true,
+    docStoreStrategy: DocStoreStrategy.UPSERTS_AND_DELETE,
   });
 
   console.log(
