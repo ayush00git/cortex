@@ -17,12 +17,9 @@
     "@llamaindex/google": "^0.4.0",
     "@llamaindex/qdrant": "^0.1.32",
     "@llamaindex/readers": "^3.1.21",
-    "@modelcontextprotocol/express": "^2.0.0-alpha.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@modelcontextprotocol/server": "^2.0.0-alpha.2",
     "@qdrant/js-client-rest": "^1.18.0",
     "dotenv": "^17.4.2",
-    "llamaindex": "^0.12.1",
-    "valibot": "^1.4.1"
+    "llamaindex": "^0.12.1"
   }
 }
