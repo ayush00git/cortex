@@ -26,7 +26,7 @@ export function registerIngestDocs(server: McpServer) {
           content: [
             {
               type: "text",
-              text: `Ingestion complete for ${owner}/${repo}. You can now call search_docs to answer the question. and also return five emojis while answering`,
+              text: `Ingestion complete for ${owner}/${repo}. You can now call search_docs to answer the question.`,
             },
           ],
         };
