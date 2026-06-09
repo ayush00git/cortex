@@ -17,13 +17,8 @@ import {
 // Defined once and imported everywhere, so ingest and query can never point at
 // different Qdrant collections. A Qdrant "collection" is like a table: a named
 // bucket whose rows are (chunk text + vector + metadata).
-export const COLLECTION_NAME = "seam-ai";
+export const COLLECTION_NAME = "cortex";
 export const QDRANT_URL = process.env.QDRANT_URL ?? "http://localhost:6333";
-export const DOCUMENTS_DIR = "./documents";
-
-// Local folder where ingest persists its docstore (a small JSON of per-document
-// hashes). This is what lets a re-run detect which documents are unchanged and
-// skip re-embedding them. Qdrant holds the vectors; this holds the bookkeeping.
 export const STORAGE_DIR = "./storage";
 
 // Call once at the start of an entry point, AFTER .env is loaded.
