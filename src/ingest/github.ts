@@ -141,7 +141,7 @@ export async function fetchRepoIssues(
           author: issue.user?.login ?? "unknown",
           url: issue.html_url,
           comment_count: comments.length,
-          file_name: `${owner}/${repo}#${issue.number} (issue)`,
+          file_name: `${owner}/${repo}/issues/${issue.number}`,
         },
       }),
     );
@@ -250,7 +250,7 @@ export async function fetchRepoPulls(
           comment_count: comments.length,
           review_comment_count: reviewComments.length,
           review_count: reviews.length,
-          file_name: `${owner}/${repo}#${pr.number} (PR)`,
+          file_name: `${owner}/${repo}/pull/${pr.number}`,
         },
       }),
     );
