@@ -26,17 +26,33 @@ export function registerSearchDocs(server: McpServer) {
 
       const answer = String(response.message.content);
 
-      // Collect unique source file_names from the retrieved chunks so the
-      // caller knows which issues/PRs the answer was grounded in.
+      // Collect unique sources from the retrieved chunks. Dedupe by file_name
+      // and include created_at / updated_at so the AI can reason about recency
+      // when the question asks about "latest" or "recent" activity.
       const sources = response.sourceNodes ?? [];
-      const sourceNames = [
-        ...new Set(sources.map((s) => s.node.metadata.file_name ?? "unknown")),
-      ];
+      const seen = new Map<string, { created_at?: string; updated_at?: string }>();
+      for (const s of sources) {
+        const meta = s.node.metadata as Record<string, unknown>;
+        const name = (meta.file_name as string) ?? "unknown";
+        if (!seen.has(name)) {
+          seen.set(name, {
+            created_at: meta.created_at as string | undefined,
+            updated_at: meta.updated_at as string | undefined,
+          });
+        }
+      }
+
+      const sourceLines = [...seen.entries()].map(([name, { created_at, updated_at }]) => {
+        const parts = [`- ${name}`];
+        if (created_at) parts.push(`created: ${created_at}`);
+        if (updated_at) parts.push(`updated: ${updated_at}`);
+        return parts.join(" | ");
+      });
 
       const text =
         answer +
-        (sourceNames.length > 0
-          ? "\n\nSources:\n" + sourceNames.map((n) => `- ${n}`).join("\n")
+        (sourceLines.length > 0
+          ? "\n\nSources:\n" + sourceLines.join("\n")
           : "");
 
       return {
