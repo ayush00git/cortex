@@ -140,6 +140,8 @@ export async function fetchRepoIssues(
           state: issue.state,
           author: issue.user?.login ?? "unknown",
           url: issue.html_url,
+          created_at: issue.created_at,
+          updated_at: issue.updated_at,
           comment_count: comments.length,
           file_name: `${owner}/${repo}/issues/${issue.number}`,
         },
@@ -241,6 +243,9 @@ export async function fetchRepoPulls(
           base_branch: pr.base.ref,
           head_branch: pr.head.ref,
           draft: pr.draft ?? false,
+          created_at: pr.created_at,
+          updated_at: pr.updated_at,
+          merged_at: pr.merged_at ?? null,
           // Reviewer fields
           requested_reviewers: requestedReviewers,
           reviewed_by: reviewedBy,
