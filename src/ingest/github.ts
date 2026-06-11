@@ -99,15 +99,23 @@ function deriveReviewerSummary(
 export async function fetchRepoIssues(
   owner: string,
   repo: string,
+  since?: string,
 ): Promise<Document[]> {
   const octokit = getOctokit();
-  console.log(`[github:issues] Fetching issues for ${owner}/${repo} ...`);
+  const ingested_at = new Date().toISOString();
+  console.log(
+    `[github:issues] Fetching issues for ${owner}/${repo}` +
+    (since ? ` since ${since}` : "") + " ...",
+  );
 
+  // GitHub's `since` filter returns all issues updated at or after that timestamp,
+  // which naturally scopes a partial re-sync to only the stale items.
   const items = await octokit.paginate(octokit.rest.issues.listForRepo, {
     owner,
     repo,
     state: "all",
     per_page: 100,
+    ...(since ? { since } : {}),
   });
 
   const documents: Document[] = [];
@@ -142,6 +150,7 @@ export async function fetchRepoIssues(
           url: issue.html_url,
           created_at: issue.created_at,
           updated_at: issue.updated_at,
+          ingested_at,
           comment_count: comments.length,
           file_name: `${owner}/${repo}/issues/${issue.number}`,
         },
@@ -160,17 +169,30 @@ export async function fetchRepoIssues(
 export async function fetchRepoPulls(
   owner: string,
   repo: string,
+  since?: string,
 ): Promise<Document[]> {
   const octokit = getOctokit();
-  console.log(`[github:pulls] Fetching pull requests for ${owner}/${repo} ...`);
+  const ingested_at = new Date().toISOString();
+  console.log(
+    `[github:pulls] Fetching pull requests for ${owner}/${repo}` +
+    (since ? ` since ${since}` : "") + " ...",
+  );
 
-  // pulls.list returns only PRs (no issues mixed in), so no filtering needed.
-  const prs = await octokit.paginate(octokit.rest.pulls.list, {
-    owner,
-    repo,
-    state: "all",
-    per_page: 100,
-  });
+  // pulls.list has no `since` parameter, but it supports sort=updated desc.
+  // The paginate callback receives each page and can call done() to stop early
+  // once we've passed the `since` boundary — avoids fetching the entire history.
+  const sinceDate = since ? new Date(since) : null;
+  const prs = await octokit.paginate(
+    octokit.rest.pulls.list,
+    { owner, repo, state: "all", sort: "updated", direction: "desc", per_page: 100 },
+    (response, done) => {
+      if (!sinceDate) return response.data;
+      const page = response.data.filter(pr => new Date(pr.updated_at) > sinceDate);
+      // If this page returned fewer items than requested, we've hit the boundary.
+      if (page.length < response.data.length) done();
+      return page;
+    },
+  );
 
   const documents: Document[] = [];
 
@@ -246,6 +268,7 @@ export async function fetchRepoPulls(
           created_at: pr.created_at,
           updated_at: pr.updated_at,
           merged_at: pr.merged_at ?? null,
+          ingested_at,
           // Reviewer fields
           requested_reviewers: requestedReviewers,
           reviewed_by: reviewedBy,

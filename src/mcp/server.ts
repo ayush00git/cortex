@@ -4,6 +4,7 @@ import { registerSearchDocs } from "./tools/search_docs.js";
 import { registerIngestDocs } from "./tools/ingest_docs.js";
 import { registerListSources } from "./tools/list_sources.js";
 import { registerDeleteDocs } from "./tools/delete_docs.js";
+import { registerCheckFreshness } from "./tools/check_freshness.js";
 
 const server = new McpServer({ name: 'cortex', version: '1.0.0' });
 
@@ -12,6 +13,7 @@ registerSearchDocs(server);
 registerIngestDocs(server);
 registerListSources(server);
 registerDeleteDocs(server);
+registerCheckFreshness(server);
 
 // stdio transport mechanism is used
 const transport = new StdioServerTransport();
