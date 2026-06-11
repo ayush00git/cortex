@@ -4,7 +4,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "tsx src/main.ts",
+    "dev": "tsx main.ts",
     "build": "tsc",
     "start": "node dist/main.js"
   },

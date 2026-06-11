@@ -2,7 +2,7 @@
     "mcpServers": {
         "cortex": {
             "command": "npx",
-            "args": ["tsx", "src/mcp/server.ts"]
+            "args": ["tsx", "mcp/server.ts"]
         }
     }
 }
