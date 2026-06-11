@@ -33,14 +33,8 @@ export function registerAskCortex(server: McpServer) {
     {
       title: "Ask Cortex",
       description:
-        "The primary tool for answering any question about a GitHub repo. " +
-        "Provide the question and the owner/repo you want to query. " +
-        "This tool handles everything internally: it verifies the repo is ingested, " +
-        "runs semantic search over stored issues and PRs, and automatically checks " +
-        "freshness for any open issues or PRs in the results — surfacing staleness " +
-        "warnings and offering to re-sync if GitHub has newer activity. " +
-        "If the repo is not ingested yet, it tells you to call ingest_docs first. " +
-        "Never call search_docs or check_freshness directly — use this tool instead.",
+        "Ask any question about a GitHub repo's issues and PRs. " +
+        "If the repo is not ingested, call ingest_docs first.",
       inputSchema: z.object({
         question: z.string().describe("The question to answer using the repo's issues and PRs"),
         owner: z.string().describe("GitHub username or org that owns the repo"),
