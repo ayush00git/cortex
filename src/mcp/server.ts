@@ -1,19 +1,17 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { registerSearchDocs } from "./tools/search_docs.js";
+import { registerAskCortex } from "./tools/ask_cortex.js";
 import { registerIngestDocs } from "./tools/ingest_docs.js";
 import { registerListSources } from "./tools/list_sources.js";
 import { registerDeleteDocs } from "./tools/delete_docs.js";
-import { registerCheckFreshness } from "./tools/check_freshness.js";
 
 const server = new McpServer({ name: 'cortex', version: '1.0.0' });
 
-// register tools with the mcp server
-registerSearchDocs(server);
+// Public tools — search_docs and check_freshness are internal to ask_cortex.
+registerAskCortex(server);
 registerIngestDocs(server);
 registerListSources(server);
 registerDeleteDocs(server);
-registerCheckFreshness(server);
 
 // stdio transport mechanism is used
 const transport = new StdioServerTransport();
