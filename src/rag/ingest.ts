@@ -21,24 +21,28 @@ import {
 } from "./settings.js";
 import { fetchRepoIssues, fetchRepoPulls } from "../ingest/github.js";
 
-export async function ingest(owner: string, repo: string): Promise<void> {
+export async function ingest(owner: string, repo: string, since?: string): Promise<void> {
   // Sets Settings.embedModel + Settings.llm to Gemini; without it the embed
   // step below would try to call OpenAI.
   initSettings();
 
   // Fetch issues and PRs in parallel — they're independent API calls and
   // parallelising them cuts wall-clock time roughly in half for large repos.
+  // When `since` is provided only items updated after that timestamp are fetched,
+  // scoping the run to the stale documents identified by check_freshness.
   const [issueDocs, pullDocs] = await Promise.all([
-    fetchRepoIssues(owner, repo),
-    fetchRepoPulls(owner, repo),
+    fetchRepoIssues(owner, repo, since),
+    fetchRepoPulls(owner, repo, since),
   ]);
 
   const documents = [...issueDocs, ...pullDocs];
 
   if (documents.length === 0) {
     throw new Error(
-      `No issues or PRs found for ${owner}/${repo}. ` +
-        "Check the repo name and that your token has the right permissions.",
+      since
+        ? `No issues or PRs updated since ${since} for ${owner}/${repo}.`
+        : `No issues or PRs found for ${owner}/${repo}. ` +
+          "Check the repo name and that your token has the right permissions.",
     );
   }
 
@@ -56,29 +60,24 @@ export async function ingest(owner: string, repo: string): Promise<void> {
     collectionName: COLLECTION_NAME,
   });
 
-  // Routes vectors to Qdrant, and persists the docstore (the per-document hash
-  // record) to STORAGE_DIR. The persisted docstore is what makes re-runs
-  // incremental: on the next run it is reloaded and used to tell which
-  // documents are unchanged.
   const storageContext = await storageContextFromDefaults({
     vectorStore,
     persistDir: STORAGE_DIR,
   });
 
-  // fromDocuments does three things: chunk each document into passages, embed
-  // each chunk via Gemini (the API calls happen here), and store every
-  // (chunk + vector + metadata) row in Qdrant.
-  //
-  // docStoreStrategy makes this idempotent: documents whose hash already exists
-  // in the docstore are skipped, changed ones are re-embedded with old vectors
-  // deleted first, and removed documents have their vectors cleaned up. The
-  // stable id_ set on each Document in github.ts is what ties the hash record
-  // to the right Qdrant rows across runs.
+  // Full ingest: UPSERTS_AND_DELETE keeps Qdrant in sync with the repo by
+  // removing vectors for documents no longer in the batch.
+  // Partial re-sync (since provided): UPSERTS only — we're touching a subset
+  // of documents so we must not delete the ones we didn't fetch.
+  const docStoreStrategy = since
+    ? DocStoreStrategy.UPSERTS
+    : DocStoreStrategy.UPSERTS_AND_DELETE;
+
   console.log("[ingest] Chunking, embedding with Gemini, and storing in Qdrant ...");
   await VectorStoreIndex.fromDocuments(documents, {
     storageContext,
     logProgress: true,
-    docStoreStrategy: DocStoreStrategy.UPSERTS_AND_DELETE,
+    docStoreStrategy,
   });
 
   console.log(
