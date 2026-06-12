@@ -10,6 +10,7 @@ import { QdrantClient } from "@qdrant/js-client-rest";
 import { COLLECTION_NAME, QDRANT_URL } from "../../rag/settings.js";
 import { search } from "../internal/search.js";
 import { checkFreshness } from "../internal/freshness.js";
+import { detectMissingDocs } from "../internal/missing.js";
 
 async function isIngested(owner: string, repo: string): Promise<boolean> {
   const client = new QdrantClient({ url: QDRANT_URL });
@@ -56,8 +57,15 @@ export function registerAskCortex(server: McpServer) {
         };
       }
 
-      // Semantic search.
-      const { answer, sources } = await search(question);
+      // Semantic search and missing-docs detection run together — they hit
+      // different systems (Qdrant+Gemini vs the GitHub API) and neither depends
+      // on the other, so parallelising keeps the detection latency hidden behind
+      // the search. Detection failures must never sink the answer, so a failed
+      // GitHub lookup degrades to "no missing info" rather than throwing.
+      const [{ answer, sources }, missingResult] = await Promise.all([
+        search(question),
+        detectMissingDocs(owner, repo).catch(() => null),
+      ]);
 
       // Run freshness checks on all open sources in parallel.
       const openSources = sources.filter(s => s.state === "open");
@@ -85,12 +93,34 @@ export function registerAskCortex(server: McpServer) {
         }
       }
 
+      // Missing-docs notice: issues/PRs created after the last ingest aren't in
+      // Qdrant at all, so the answer above was produced without them. Surface
+      // them explicitly and tell the agent how to pull them in — passing
+      // latestIngestedAt as `since` re-syncs only what's new rather than the
+      // whole repo.
+      const missing = missingResult?.missing ?? [];
+      let missingNotice = "";
+      if (missing.length > 0) {
+        const itemLines = missing.map(
+          (m) => `- ${m.file_name} — "${m.title}" (created ${m.created_at})`,
+        );
+        missingNotice =
+          `\n⚠ ${missing.length} ${missing.length === 1 ? "item was" : "items were"} created on GitHub ` +
+          `after this repo was last ingested, so the answer above does not account for ${missing.length === 1 ? "it" : "them"}:\n` +
+          itemLines.join("\n") +
+          `\n\nCall ingest_docs with owner="${owner}", repo="${repo}", and ` +
+          `since="${missingResult!.latestIngestedAt}" to add ${missing.length === 1 ? "it" : "them"}, then ask again.`;
+      }
+
       const sections: string[] = [answer];
       if (sourceLines.length > 0) {
         sections.push("\nSources:\n" + sourceLines.join("\n"));
       }
       if (warnings.length > 0) {
         sections.push("\nFreshness:\n" + warnings.join("\n"));
+      }
+      if (missingNotice) {
+        sections.push("\nMissing:\n" + missingNotice.trimStart());
       }
 
       return {
