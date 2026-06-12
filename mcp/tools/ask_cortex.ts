@@ -93,7 +93,8 @@ export function registerAskCortex(server: McpServer) {
         if (fr.isOpen && fr.hasNewActivity) {
           warnings.push(
             `⚠ ${fr.file_name} is still open and has new activity on GitHub since it was last synced ${fr.syncedLabel}. ` +
-            `Call ingest_docs with since="${fr.ingestedAt}" to re-sync only the updated items.`,
+            `Ask the user whether they'd like to re-sync the latest updates into Cortex; ` +
+            `if they agree, call ingest_docs with since="${fr.ingestedAt}" to update only the changed items.`,
           );
         } else if (fr.isOpen && !fr.hasNewActivity) {
           warnings.push(`✓ ${fr.file_name} is open and up to date (synced ${fr.syncedLabel}).`);
@@ -102,21 +103,24 @@ export function registerAskCortex(server: McpServer) {
 
       // Missing-docs notice: issues/PRs created after the last ingest aren't in
       // Qdrant at all, so the answer above was produced without them. Surface
-      // them explicitly and tell the agent how to pull them in — passing
-      // latestIngestedAt as `since` re-syncs only what's new rather than the
-      // whole repo.
+      // them, then frame the fix as a re-sync offer the agent puts to the user
+      // rather than a bare command — the user just says yes, and the agent runs
+      // the ingest. The `since` mechanics stay as an internal hint for the agent
+      // so the re-sync only pulls the new items, not the whole repo.
       const missing = missingResult?.missing ?? [];
       let missingNotice = "";
       if (missing.length > 0) {
+        const one = missing.length === 1;
         const itemLines = missing.map(
           (m) => `- ${m.file_name} — "${m.title}" (created ${m.created_at})`,
         );
         missingNotice =
-          `\n⚠ ${missing.length} ${missing.length === 1 ? "item was" : "items were"} created on GitHub ` +
-          `after this repo was last ingested, so the answer above does not account for ${missing.length === 1 ? "it" : "them"}:\n` +
+          `\n⚠ ${missing.length} new ${one ? "item has" : "items have"} been opened on GitHub since ` +
+          `${owner}/${repo} was last synced, so the answer above doesn't include ${one ? "it" : "them"}:\n` +
           itemLines.join("\n") +
-          `\n\nCall ingest_docs with owner="${owner}", repo="${repo}", and ` +
-          `since="${missingResult!.latestIngestedAt}" to add ${missing.length === 1 ? "it" : "them"}, then ask again.`;
+          `\n\nAsk the user whether they'd like to re-sync the latest updates into Cortex. ` +
+          `If they agree, add ${one ? "it" : "them"} by calling ingest_docs with owner="${owner}", ` +
+          `repo="${repo}", since="${missingResult!.latestIngestedAt}", then answer again.`;
       }
 
       // Lead with the TL;DR (when one was produced) so the conclusion is the
