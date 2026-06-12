@@ -11,6 +11,7 @@ import { COLLECTION_NAME, QDRANT_URL } from "../../rag/settings.js";
 import { search } from "../internal/search.js";
 import { checkFreshness } from "../internal/freshness.js";
 import { detectMissingDocs } from "../internal/missing.js";
+import { summarize } from "../internal/summarize.js";
 
 async function isIngested(owner: string, repo: string): Promise<boolean> {
   const client = new QdrantClient({ url: QDRANT_URL });
@@ -67,9 +68,15 @@ export function registerAskCortex(server: McpServer) {
         detectMissingDocs(owner, repo).catch(() => null),
       ]);
 
-      // Run freshness checks on all open sources in parallel.
+      // Freshness checks and summarization both depend on the search result but
+      // not on each other — freshness hits the GitHub API per open source while
+      // summarize makes one Gemini call — so we overlap them. summarize returns
+      // null for short answers or on any error, so it never blocks the response.
       const openSources = sources.filter(s => s.state === "open");
-      const freshnessResults = await Promise.all(openSources.map(checkFreshness));
+      const [freshnessResults, tldr] = await Promise.all([
+        Promise.all(openSources.map(checkFreshness)),
+        summarize(question, answer),
+      ]);
 
       // Build the source lines with created/updated timestamps.
       const sourceLines = sources.map(s => {
@@ -112,7 +119,13 @@ export function registerAskCortex(server: McpServer) {
           `since="${missingResult!.latestIngestedAt}" to add ${missing.length === 1 ? "it" : "them"}, then ask again.`;
       }
 
-      const sections: string[] = [answer];
+      // Lead with the TL;DR (when one was produced) so the conclusion is the
+      // first thing the caller sees, with the full answer right below it.
+      const sections: string[] = [];
+      if (tldr) {
+        sections.push("TL;DR:\n" + tldr + "\n");
+      }
+      sections.push(answer);
       if (sourceLines.length > 0) {
         sections.push("\nSources:\n" + sourceLines.join("\n"));
       }
