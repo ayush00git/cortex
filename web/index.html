@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cortex · Brain</title>
+<style>
+  :root {
+    --bg: #070a12;
+    --panel: rgba(17, 23, 38, 0.72);
+    --panel-border: rgba(129, 140, 248, 0.18);
+    --text: #e6ebf5;
+    --muted: #8792ab;
+    --accent: #818cf8;
+    --issue-open: #38bdf8;
+    --issue-closed: #64748b;
+    --pr-open: #4ade80;
+    --pr-merged: #a78bfa;
+    --pr-closed: #fb7185;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; display: block; cursor: grab; }
+  #stage.dragging { cursor: grabbing; }
+
+  /* ---- Header ---- */
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px 20px; pointer-events: none;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; pointer-events: auto; }
+  .brand h1 {
+    margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em;
+  }
+  .brand .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px 2px var(--accent);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .brand small { color: var(--muted); font-size: 12px; }
+
+  /* ---- Panels ---- */
+  .panel {
+    position: fixed;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  }
+  #controls {
+    top: 62px; left: 20px; width: 260px; padding: 16px; max-height: calc(100vh - 96px);
+    overflow-y: auto;
+  }
+  #controls h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
+  #controls .group { margin-bottom: 18px; }
+  .search {
+    width: 100%; padding: 9px 12px; border-radius: 9px;
+    border: 1px solid var(--panel-border); background: rgba(255,255,255,0.04);
+    color: var(--text); font-size: 13px; outline: none;
+  }
+  .search:focus { border-color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border-radius: 999px; cursor: pointer; user-select: none;
+    font-size: 12px; border: 1px solid var(--panel-border);
+    background: rgba(255,255,255,0.03); color: var(--muted);
+    transition: all 0.15s ease;
+  }
+  .chip .swatch { width: 9px; height: 9px; border-radius: 50%; }
+  .chip.on { color: var(--text); background: rgba(129,140,248,0.14); border-color: rgba(129,140,248,0.5); }
+  .chip.off { opacity: 0.4; text-decoration: line-through; }
+  .row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+  .btn {
+    width: 100%; margin-top: 6px; padding: 9px; border-radius: 9px; cursor: pointer;
+    border: 1px solid var(--panel-border); background: rgba(129,140,248,0.12);
+    color: var(--text); font-size: 13px; font-weight: 550; transition: background 0.15s;
+  }
+  .btn:hover { background: rgba(129,140,248,0.22); }
+
+  /* ---- Stats (bottom-left) ---- */
+  #stats {
+    bottom: 20px; left: 20px; padding: 12px 16px; display: flex; gap: 18px;
+  }
+  #stats .stat { text-align: left; }
+  #stats .stat b { display: block; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+  #stats .stat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* ---- Legend (bottom-right) ---- */
+  #legend { bottom: 20px; right: 20px; padding: 12px 14px; }
+  #legend .li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin: 4px 0; }
+  #legend .li .swatch { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ---- Tooltip ---- */
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 20; max-width: 320px;
+    padding: 11px 13px; border-radius: 11px; opacity: 0; transform: translateY(4px);
+    transition: opacity 0.12s ease, transform 0.12s ease;
+    background: rgba(12, 17, 30, 0.94); border: 1px solid var(--panel-border);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55); backdrop-filter: blur(8px);
+  }
+  #tooltip.show { opacity: 1; transform: translateY(0); }
+  #tooltip .tt-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; line-height: 1.35; }
+  #tooltip .tt-meta { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; }
+  #tooltip .tt-badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; }
+
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 14px; color: var(--muted); z-index: 30;
+    background: var(--bg); transition: opacity 0.4s; font-size: 13px;
+  }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+  .spinner {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 2px solid rgba(129,140,248,0.2); border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hint { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    color: var(--muted); font-size: 11.5px; opacity: 0.6; pointer-events: none; }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <div class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>Cortex</h1>
+      <small id="subtitle">semantic brain</small>
+    </div>
+  </div>
+
+  <div id="controls" class="panel">
+    <div class="group">
+      <h2>Search</h2>
+      <input id="search" class="search" placeholder="title, #number, author…" autocomplete="off" />
+    </div>
+    <div class="group">
+      <h2>Type</h2>
+      <div class="chips" id="typeChips"></div>
+    </div>
+    <div class="group">
+      <h2>State</h2>
+      <div class="chips" id="stateChips"></div>
+    </div>
+    <div class="group" id="repoGroup">
+      <h2>Repository</h2>
+      <div class="chips" id="repoChips"></div>
+    </div>
+    <div class="group">
+      <button class="btn" id="reheat">↻ Reheat layout</button>
+    </div>
+  </div>
+
+  <div id="stats" class="panel">
+    <div class="stat"><b id="statDocs">0</b><span>nodes</span></div>
+    <div class="stat"><b id="statLinks">0</b><span>links</span></div>
+    <div class="stat"><b id="statVisible">0</b><span>shown</span></div>
+  </div>
+
+  <div id="legend" class="panel"></div>
+
+  <div id="tooltip"></div>
+
+  <div class="hint">drag to pan · scroll to zoom · drag a node to move it · click to open on GitHub</div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div>Loading the brain…</div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const COLORS = {
+    "issue-open":   getVar("--issue-open"),
+    "issue-closed": getVar("--issue-closed"),
+    "pr-open":      getVar("--pr-open"),
+    "pr-merged":    getVar("--pr-merged"),
+    "pr-closed":    getVar("--pr-closed"),
+  };
+  const ACCENT = getVar("--accent");
+  function getVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+  function colorKey(n) {
+    if (n.type === "pr") {
+      if (n.state === "merged") return "pr-merged";
+      if (n.state === "open") return "pr-open";
+      return "pr-closed";
+    }
+    return n.state === "open" ? "issue-open" : "issue-closed";
+  }
+  function nodeColor(n) { return COLORS[colorKey(n)] || "#888"; }
+  function nodeRadius(n) { return 4 + Math.sqrt(n.activity || 0) * 1.6; }
+
+  // ---- Canvas / camera ----
+  const canvas = document.getElementById("stage");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0, DPR = 1;
+  const cam = { x: 0, y: 0, scale: 1 };   // world→screen: screen = (world - cam) * scale + center
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  const toScreen = (wx, wy) => [ (wx - cam.x) * cam.scale + W / 2, (wy - cam.y) * cam.scale + H / 2 ];
+  const toWorld  = (sx, sy) => [ (sx - W / 2) / cam.scale + cam.x, (sy - H / 2) / cam.scale + cam.y ];
+
+  // ---- State ----
+  let nodes = [], links = [], nodeById = new Map();
+  let alpha = 1;                 // simulation temperature
+  const filters = { types: new Set(["issue", "pr"]), states: new Set(), repos: new Set() };
+  let searchTerm = "";
+  let hovered = null, dragNode = null, panning = false;
+  let lastPointer = { x: 0, y: 0 };
+
+  // ---- Load ----
+  fetch("/api/graph")
+    .then((r) => r.json())
+    .then((g) => { init(g); })
+    .catch((err) => {
+      document.getElementById("loading").innerHTML =
+        '<div style="max-width:340px;text-align:center">Could not load the graph.<br><br>' +
+        'Is Qdrant running and something ingested?<br><span style="color:#fb7185">' +
+        String(err) + "</span></div>";
+    });
+
+  function init(g) {
+    links = g.links.map((l) => ({ ...l }));
+    // Seed positions on a circle with jitter so the sim unfolds nicely.
+    nodes = g.nodes.map((n, i) => {
+      const a = (i / g.nodes.length) * Math.PI * 2;
+      const r = 200 + Math.random() * 260;
+      return { ...n, x: Math.cos(a) * r + rand(30), y: Math.sin(a) * r + rand(30), vx: 0, vy: 0, fixed: false };
+    });
+    nodeById = new Map(nodes.map((n) => [n.id, n]));
+    // Resolve link endpoints to node refs.
+    links = links
+      .map((l) => ({ ...l, s: nodeById.get(l.source), t: nodeById.get(l.target) }))
+      .filter((l) => l.s && l.t);
+
+    // Populate filters.
+    const states = [...new Set(nodes.map((n) => n.state))];
+    filters.states = new Set(states);
+    filters.repos = new Set(g.meta.repos);
+
+    buildChips(g.meta.repos, states);
+    buildLegend();
+
+    document.getElementById("statDocs").textContent = g.meta.docs;
+    document.getElementById("statLinks").textContent = g.meta.links;
+    document.getElementById("subtitle").textContent =
+      g.meta.repos.length === 1 ? g.meta.repos[0] : g.meta.repos.length + " repos · " + g.meta.collection;
+    if (g.meta.repos.length <= 1) document.getElementById("repoGroup").style.display = "none";
+
+    document.getElementById("loading").classList.add("hidden");
+    updateVisible();
+    requestAnimationFrame(tick);
+  }
+
+  const rand = (m) => (Math.random() - 0.5) * m;
+
+  // ---- Filters UI ----
+  function buildChips(repos, states) {
+    const typeChips = document.getElementById("typeChips");
+    [["issue", "Issues"], ["pr", "PRs"]].forEach(([key, label]) => {
+      typeChips.appendChild(makeChip(label, null, filters.types, key, updateVisible));
+    });
+
+    const stateChips = document.getElementById("stateChips");
+    states.forEach((s) => {
+      stateChips.appendChild(makeChip(s, null, filters.states, s, updateVisible));
+    });
+
+    const repoChips = document.getElementById("repoChips");
+    repos.forEach((r) => {
+      repoChips.appendChild(makeChip(r, null, filters.repos, r, updateVisible));
+    });
+  }
+
+  function makeChip(label, swatchColor, set, key, onChange) {
+    const el = document.createElement("span");
+    el.className = "chip on";
+    if (swatchColor) {
+      const sw = document.createElement("span");
+      sw.className = "swatch"; sw.style.background = swatchColor;
+      el.appendChild(sw);
+    }
+    el.appendChild(document.createTextNode(label));
+    el.addEventListener("click", () => {
+      if (set.has(key)) { set.delete(key); el.classList.remove("on"); el.classList.add("off"); }
+      else { set.add(key); el.classList.add("on"); el.classList.remove("off"); }
+      onChange();
+    });
+    return el;
+  }
+
+  function buildLegend() {
+    const legend = document.getElementById("legend");
+    const items = [
+      ["issue-open", "Issue · open"],
+      ["issue-closed", "Issue · closed"],
+      ["pr-open", "PR · open"],
+      ["pr-merged", "PR · merged"],
+      ["pr-closed", "PR · closed"],
+    ];
+    legend.innerHTML = "";
+    items.forEach(([k, label]) => {
+      const row = document.createElement("div");
+      row.className = "li";
+      const sw = document.createElement("span");
+      sw.className = "swatch"; sw.style.background = COLORS[k];
+      sw.style.boxShadow = "0 0 8px " + COLORS[k];
+      row.appendChild(sw); row.appendChild(document.createTextNode(label));
+      legend.appendChild(row);
+    });
+  }
+
+  function nodeVisible(n) {
+    if (!filters.types.has(n.type)) return false;
+    if (!filters.states.has(n.state)) return false;
+    if (!filters.repos.has(n.owner + "/" + n.repo)) return false;
+    return true;
+  }
+  function nodeMatchesSearch(n) {
+    if (!searchTerm) return true;
+    const hay = (n.title + " #" + n.number + " " + n.author).toLowerCase();
+    return hay.includes(searchTerm);
+  }
+
+  function updateVisible() {
+    let shown = 0;
+    for (const n of nodes) { n._vis = nodeVisible(n); if (n._vis) shown++; }
+    document.getElementById("statVisible").textContent = shown;
+    reheat(0.6);
+  }
+
+  document.getElementById("search").addEventListener("input", (e) => {
+    searchTerm = e.target.value.trim().toLowerCase();
+  });
+  document.getElementById("reheat").addEventListener("click", () => reheat(1));
+  function reheat(a) { alpha = Math.max(alpha, a); }
+
+  // ---- Force simulation ----
+  const REPULSION = 5200;
+  const SPRING = 0.012;
+  const LINK_LEN = 70;
+  const GRAVITY = 0.014;
+  const DAMPING = 0.86;
+
+  function simulate() {
+    if (alpha < 0.005) return;
+    const vis = nodes.filter((n) => n._vis);
+
+    // Repulsion (O(n²) — fine for a personal corpus).
+    for (let i = 0; i < vis.length; i++) {
+      const a = vis[i];
+      for (let j = i + 1; j < vis.length; j++) {
+        const b = vis[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 0.01) { dx = rand(1); dy = rand(1); d2 = 0.01; }
+        const f = (REPULSION * alpha) / d2;
+        const d = Math.sqrt(d2);
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+      }
+    }
+
+    // Springs along links (stronger for higher similarity).
+    for (const l of links) {
+      if (!l.s._vis || !l.t._vis) continue;
+      const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const target = LINK_LEN * (1.4 - l.weight);     // similar → closer
+      const f = (d - target) * SPRING * alpha * (0.5 + l.weight);
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      l.s.vx += fx; l.s.vy += fy; l.t.vx -= fx; l.t.vy -= fy;
+    }
+
+    // Gravity toward origin + integrate.
+    for (const n of vis) {
+      if (n === dragNode) continue;
+      n.vx -= n.x * GRAVITY * alpha;
+      n.vy -= n.y * GRAVITY * alpha;
+      n.vx *= DAMPING; n.vy *= DAMPING;
+      n.x += n.vx; n.y += n.vy;
+    }
+
+    alpha *= 0.985;
+  }
+
+  // ---- Render ----
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    // Subtle radial vignette.
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+    g.addColorStop(0, "rgba(30,41,80,0.35)");
+    g.addColorStop(1, "rgba(7,10,18,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    const searching = !!searchTerm;
+
+    // Links.
+    ctx.lineWidth = 1;
+    for (const l of links) {
+      if (!l.s._vis || !l.t._vis) continue;
+      const [x1, y1] = toScreen(l.s.x, l.s.y);
+      const [x2, y2] = toScreen(l.t.x, l.t.y);
+      const hot = hovered && (l.s === hovered || l.t === hovered);
+      let a = 0.04 + l.weight * 0.14;
+      if (hot) a = 0.5;
+      ctx.strokeStyle = hot ? ACCENT : "rgba(130,150,200," + a + ")";
+      ctx.globalAlpha = hot ? 0.85 : 1;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Nodes.
+    for (const n of nodes) {
+      if (!n._vis) continue;
+      const [x, y] = toScreen(n.x, n.y);
+      const r = nodeRadius(n) * Math.max(0.6, Math.min(cam.scale, 2.2));
+      const dim = searching && !nodeMatchesSearch(n);
+      const isHot = n === hovered || (searching && !dim);
+      const col = nodeColor(n);
+
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.globalAlpha = dim ? 0.12 : 1;
+      ctx.shadowColor = col;
+      ctx.shadowBlur = isHot ? 24 : 12;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      if (n === hovered) {
+        ctx.beginPath(); ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.9; ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // Labels when zoomed in or hovered.
+      if ((cam.scale > 1.5 || n === hovered) && !dim) {
+        ctx.fillStyle = "rgba(230,235,245,0.85)";
+        ctx.font = "11px -apple-system, sans-serif";
+        ctx.textAlign = "center";
+        const label = "#" + n.number;
+        ctx.fillText(label, x, y - r - 6);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function tick() {
+    simulate();
+    render();
+    requestAnimationFrame(tick);
+  }
+
+  // ---- Interaction ----
+  function pickNode(sx, sy) {
+    let best = null, bestD = Infinity;
+    for (const n of nodes) {
+      if (!n._vis) continue;
+      const [x, y] = toScreen(n.x, n.y);
+      const r = nodeRadius(n) * Math.max(0.6, Math.min(cam.scale, 2.2)) + 6;
+      const dx = sx - x, dy = sy - y, d = dx * dx + dy * dy;
+      if (d < r * r && d < bestD) { best = n; bestD = d; }
+    }
+    return best;
+  }
+
+  canvas.addEventListener("mousemove", (e) => {
+    const sx = e.clientX, sy = e.clientY;
+    if (dragNode) {
+      const [wx, wy] = toWorld(sx, sy);
+      dragNode.x = wx; dragNode.y = wy; dragNode.vx = 0; dragNode.vy = 0;
+      reheat(0.35);
+      showTooltip(dragNode, sx, sy);
+      return;
+    }
+    if (panning) {
+      cam.x -= (sx - lastPointer.x) / cam.scale;
+      cam.y -= (sy - lastPointer.y) / cam.scale;
+      lastPointer = { x: sx, y: sy };
+      return;
+    }
+    const n = pickNode(sx, sy);
+    hovered = n;
+    canvas.style.cursor = n ? "pointer" : "grab";
+    if (n) showTooltip(n, sx, sy); else hideTooltip();
+  });
+
+  canvas.addEventListener("mousedown", (e) => {
+    const n = pickNode(e.clientX, e.clientY);
+    if (n) { dragNode = n; n.fixed = true; }
+    else { panning = true; canvas.classList.add("dragging"); }
+    lastPointer = { x: e.clientX, y: e.clientY };
+    lastPointer.moved = false;
+  });
+
+  window.addEventListener("mouseup", (e) => {
+    if (dragNode) {
+      // A click (no real drag) opens the item on GitHub.
+      const moved = Math.hypot(e.clientX - lastPointer.x, e.clientY - lastPointer.y);
+      if (moved < 4 && dragNode.url) window.open(dragNode.url, "_blank", "noopener");
+      dragNode.fixed = false;
+      dragNode = null;
+    }
+    panning = false; canvas.classList.remove("dragging");
+  });
+
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    // Zoom toward the cursor: remember the world point under it, rescale, then
+    // shift the camera so that same world point lands under the cursor again.
+    const [wx, wy] = toWorld(e.clientX, e.clientY);
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    cam.scale = Math.max(0.15, Math.min(cam.scale * factor, 6));
+    const [wx2, wy2] = toWorld(e.clientX, e.clientY);
+    cam.x += wx - wx2; cam.y += wy - wy2;
+  }, { passive: false });
+
+  // ---- Tooltip ----
+  const tooltip = document.getElementById("tooltip");
+  function showTooltip(n, sx, sy) {
+    const col = nodeColor(n);
+    const badge = '<span class="tt-badge" style="background:' + hexA(col, 0.18) + ";color:" + col + '">'
+      + n.type.toUpperCase() + " · " + n.state + "</span>";
+    tooltip.innerHTML =
+      '<div class="tt-title">' + escapeHtml(n.title) + "</div>" +
+      '<div class="tt-meta">' + badge +
+      "<span>#" + n.number + "</span>" +
+      "<span>@" + escapeHtml(n.author) + "</span>" +
+      (n.activity ? "<span>" + n.activity + " activity</span>" : "") +
+      "<span>" + escapeHtml(n.repo) + "</span>" +
+      "</div>";
+    tooltip.classList.add("show");
+    const pad = 16;
+    let x = sx + pad, y = sy + pad;
+    const rect = tooltip.getBoundingClientRect();
+    if (x + rect.width > W) x = sx - rect.width - pad;
+    if (y + rect.height > H) y = sy - rect.height - pad;
+    tooltip.style.left = x + "px"; tooltip.style.top = y + "px";
+  }
+  function hideTooltip() { tooltip.classList.remove("show"); }
+
+  function hexA(hex, a) {
+    const h = hex.replace("#", "");
+    const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+})();
+</script>
+</body>
+</html>
