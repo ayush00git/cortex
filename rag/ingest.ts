@@ -13,6 +13,7 @@ import {
   DocStoreStrategy,
 } from "llamaindex";
 import { QdrantVectorStore } from "@llamaindex/qdrant";
+import { QdrantClient } from "@qdrant/js-client-rest";
 import {
   initSettings,
   COLLECTION_NAME,
@@ -20,6 +21,35 @@ import {
   STORAGE_DIR,
 } from "./settings.js";
 import { fetchRepoIssues, fetchRepoPulls } from "../ingest/github.js";
+
+// Payload fields we filter on: repo scoping in queries (owner + repo), the
+// isIngested gate, and freshness/state checks. All repos share one collection,
+// so without a payload index Qdrant filters these with a linear scan of every
+// point — fine for one repo, increasingly costly as the collection grows across
+// many. A keyword index turns each into an indexed lookup.
+const INDEXED_FIELDS = ["owner", "repo", "source", "state"] as const;
+
+// Idempotent: creating an index that already exists is a no-op in Qdrant, so
+// this is safe to run on every ingest. The collection must already exist, so
+// call it AFTER the first insert. Never fatal — filters still return correct
+// results without the index, just slower, so a failure here must not sink an
+// otherwise-successful ingest.
+async function ensurePayloadIndexes(): Promise<void> {
+  const client = new QdrantClient({ url: QDRANT_URL });
+  for (const field of INDEXED_FIELDS) {
+    try {
+      await client.createPayloadIndex(COLLECTION_NAME, {
+        field_name: field,
+        field_schema: "keyword",
+        wait: true,
+      });
+      console.log(`[ingest] payload index ready for "${field}".`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[ingest] could not create payload index for "${field}": ${msg}`);
+    }
+  }
+}
 
 export async function ingest(owner: string, repo: string, since?: string): Promise<void> {
   // Sets Settings.embedModel + Settings.llm to Gemini; without it the embed
@@ -79,6 +109,10 @@ export async function ingest(owner: string, repo: string, since?: string): Promi
     logProgress: true,
     docStoreStrategy,
   });
+
+  // The insert above auto-creates the collection on first run; assert the
+  // payload indexes now that it's guaranteed to exist.
+  await ensurePayloadIndexes();
 
   console.log(
     `[ingest] Done. ${owner}/${repo} is now searchable in the "${COLLECTION_NAME}" collection.`,
