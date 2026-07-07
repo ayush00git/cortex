@@ -19,12 +19,36 @@
 import "dotenv/config";
 
 import { VectorStoreIndex } from "llamaindex";
+import type { MetadataFilters } from "@llamaindex/core/vector-store";
 import { QdrantVectorStore } from "@llamaindex/qdrant";
 import { initSettings, COLLECTION_NAME, QDRANT_URL } from "./settings.js";
 
+// Scopes retrieval to a single repo. All repos share one Qdrant collection, so
+// without this filter a question about owner/repo can retrieve chunks from a
+// *different* repo and blend them into one answer. Callers that legitimately
+// want cross-repo search (e.g. the standalone CLI) omit it.
+export interface RepoScope {
+  owner: string;
+  repo: string;
+}
+
+// Builds the pre-retrieval metadata filter for a repo scope. owner AND repo
+// must both match — the fields are stamped on every Document at ingest time.
+function repoFilters({ owner, repo }: RepoScope): MetadataFilters {
+  return {
+    filters: [
+      { key: "owner", value: owner, operator: "==" },
+      { key: "repo", value: repo, operator: "==" },
+    ],
+    condition: "and",
+  };
+}
+
 // Builds a query engine bound to the existing Qdrant collection. Exported so
 // chat.ts (Step 4) can reuse the exact same setup instead of duplicating it.
-export async function createQueryEngine() {
+// Pass a RepoScope to restrict retrieval to one repo; omit it to search across
+// every ingested repo.
+export async function createQueryEngine(scope?: RepoScope) {
   // Sets Settings.embedModel + Settings.llm to Gemini. The embed model MUST be
   // the same one used during ingest, or the question's vector would have a
   // different size/space than the stored vectors and the search would break.
@@ -41,7 +65,12 @@ export async function createQueryEngine() {
 
   // similarityTopK = how many of the closest chunks to feed the LLM as context.
   // More context can mean better answers but more tokens; 3 is a sensible start.
-  return index.asQueryEngine({ similarityTopK: 3 });
+  // preFilters runs in Qdrant *before* the vector search, so topK is measured
+  // against this repo's chunks only rather than the whole collection.
+  return index.asQueryEngine({
+    similarityTopK: 3,
+    ...(scope ? { preFilters: repoFilters(scope) } : {}),
+  });
 }
 
 export async function query(question: string): Promise<void> {

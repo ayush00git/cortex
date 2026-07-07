@@ -64,7 +64,7 @@ export function registerAskCortex(server: McpServer) {
       // the search. Detection failures must never sink the answer, so a failed
       // GitHub lookup degrades to "no missing info" rather than throwing.
       const [{ answer, sources }, missingResult] = await Promise.all([
-        search(question),
+        search(question, { owner, repo }),
         detectMissingDocs(owner, repo).catch(() => null),
       ]);
 
