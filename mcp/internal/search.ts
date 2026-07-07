@@ -1,6 +1,6 @@
 // Internal search helper — not exposed as an MCP tool. Called by ask_cortex.
 
-import { createQueryEngine } from "../../rag/query.js";
+import { createQueryEngine, type RepoScope } from "../../rag/query.js";
 
 export interface SourceMeta {
   file_name: string;
@@ -19,8 +19,10 @@ export interface SearchResult {
   sources: SourceMeta[];
 }
 
-export async function search(question: string): Promise<SearchResult> {
-  const queryEngine = await createQueryEngine();
+export async function search(question: string, scope?: RepoScope): Promise<SearchResult> {
+  // scope restricts retrieval to a single repo; ask_cortex always passes it so
+  // an answer is grounded only in the repo the caller asked about.
+  const queryEngine = await createQueryEngine(scope);
   const response = await queryEngine.query({ query: question });
   const answer = String(response.message.content);
 
