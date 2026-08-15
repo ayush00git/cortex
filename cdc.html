@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CDC Design — seam-ai incremental ingestion</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a21;
+    --panel-2: #1b212b;
+    --ink: #e7eaf0;
+    --ink-dim: #aeb7c4;
+    --ink-faint: #717c8c;
+    --accent: #6ea8fe;
+    --accent-2: #7ee0b8;
+    --warn: #f0b454;
+    --bad: #f08a8a;
+    --line: #29303d;
+    --code-bg: #0b0d11;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.7;
+    font-size: 16.5px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* top bar */
+  .topbar {
+    position: sticky; top: 0; z-index: 500;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px;
+    padding: 12px 24px;
+    background: rgba(15,17,21,0.88);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar .brand { font-weight: 700; letter-spacing: .2px; }
+  .topbar .brand span { color: var(--accent); }
+  .topbar .hint { color: var(--ink-faint); font-size: 13px; }
+  .btn {
+    font-family: var(--sans); font-size: 14px; font-weight: 600;
+    color: #0b0d11; background: var(--accent-2);
+    border: none; border-radius: 8px; padding: 9px 14px;
+    cursor: pointer; transition: transform .08s ease, filter .15s ease;
+  }
+  .btn:hover { filter: brightness(1.07); }
+  .btn:active { transform: translateY(1px); }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 48px 24px 160px; }
+
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 14px; letter-spacing: -0.3px; }
+  .lead { color: var(--ink-dim); margin: 0 0 28px; font-size: 17px; }
+
+  h2 {
+    font-size: 23px; margin: 52px 0 14px; letter-spacing: -0.2px;
+  }
+  h2 .num {
+    display: inline-block; min-width: 30px;
+    color: var(--accent); font-variant-numeric: tabular-nums;
+    margin-right: 6px; font-size: 18px;
+  }
+  h3 { font-size: 16.5px; margin: 26px 0 6px; color: #fff; }
+  p { margin: 12px 0; }
+  .dim { color: var(--ink-dim); }
+  strong { color: #fff; font-weight: 650; }
+
+  code {
+    font-family: var(--mono); font-size: 13.5px;
+    background: var(--panel-2); padding: 2px 6px; border-radius: 5px;
+    color: var(--accent-2);
+  }
+
+  ul, ol { margin: 12px 0; padding-left: 24px; }
+  li { margin: 7px 0; }
+
+  /* the big readable takeaway box at the top */
+  .tldr {
+    background: linear-gradient(180deg, #1a2433, #161d28);
+    border: 1px solid #2c3a4f;
+    border-radius: 14px; padding: 20px 24px; margin: 8px 0 8px;
+  }
+  .tldr .tag { color: var(--accent); font-weight: 700; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+  .tldr p { margin: 8px 0 0; font-size: 16px; }
+
+  /* example / visual blocks — clean, not cramped */
+  .example {
+    background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px 20px; margin: 18px 0;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.9;
+  }
+  .example .title {
+    font-family: var(--sans); font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .8px;
+    color: var(--ink-faint); margin-bottom: 10px;
+  }
+  .example .row { white-space: pre; overflow-x: auto; }
+  .example .lbl { color: var(--ink-faint); }
+  .chip { padding: 1px 7px; border-radius: 5px; }
+  .chip.same { background: rgba(126,224,184,0.16); color: var(--accent-2); }
+  .chip.diff { background: rgba(240,138,138,0.16); color: var(--bad); }
+  .note-line { font-family: var(--sans); font-size: 13.5px; margin-top: 10px; }
+  .note-line.good { color: var(--accent-2); }
+  .note-line.bad { color: var(--bad); }
+
+  blockquote {
+    margin: 16px 0; padding: 4px 18px;
+    border-left: 3px solid var(--ink-faint);
+    color: var(--ink-dim); font-style: italic;
+  }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--panel);
+    border-radius: 0 12px 12px 0;
+    padding: 14px 18px; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout .tag {
+    display: block; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .8px;
+    color: var(--accent); margin-bottom: 4px;
+  }
+  .callout.warn .tag { color: var(--warn); }
+  .callout p { margin: 2px 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-dim); font-weight: 600; }
+  td code { white-space: nowrap; }
+
+  /* question cards */
+  .qcard {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 20px 22px; margin: 18px 0;
+  }
+  .qcard h3 { margin-top: 0; color: var(--accent); font-size: 17px; }
+  .opt { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; margin: 10px 0; background: var(--panel-2); }
+  .opt .lab { font-weight: 700; color: #fff; }
+  .opt .lab .rec { color: var(--accent-2); font-size: 12px; font-weight: 700; margin-left: 8px; }
+  .opt .desc { color: var(--ink-dim); font-size: 14px; margin-top: 3px; line-height: 1.55; }
+
+  .sources { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); }
+  .sources h3 { color: var(--ink-dim); font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+  .sources a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  .sources a:hover { text-decoration: underline; }
+  .sources li { color: var(--ink-faint); }
+
+  .footer-note { color: var(--ink-faint); font-size: 13px; margin-top: 34px; text-align: center; }
+
+  /* ---------- floating sticky notes ---------- */
+  .note {
+    position: fixed; z-index: 1000;
+    width: 240px; height: 160px;
+    min-width: 170px; min-height: 110px;
+    max-width: 92vw; max-height: 92vh;
+    display: flex; flex-direction: column;
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.3);
+    overflow: hidden;
+    font-family: var(--sans);
+    resize: both;
+  }
+  .note .note-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 8px 6px 10px;
+    cursor: grab;
+    user-select: none;
+    background: rgba(0,0,0,0.14);
+  }
+  .note .note-bar:active { cursor: grabbing; }
+  .note .grip {
+    font-size: 12px; font-weight: 700; color: rgba(0,0,0,0.5);
+    letter-spacing: 1px;
+  }
+  .note .note-x {
+    border: none; background: rgba(0,0,0,0.12); color: rgba(0,0,0,0.6);
+    width: 20px; height: 20px; border-radius: 5px; cursor: pointer;
+    font-size: 14px; line-height: 1; font-weight: 700;
+  }
+  .note .note-x:hover { background: rgba(0,0,0,0.25); color: #000; }
+  .note textarea {
+    flex: 1; border: none; outline: none; resize: none;
+    background: transparent; color: rgba(0,0,0,0.82);
+    font-family: var(--sans); font-size: 14px; line-height: 1.5;
+    padding: 8px 10px 12px;
+  }
+  .note textarea::placeholder { color: rgba(0,0,0,0.4); }
+  .note .note-right { display: flex; align-items: center; gap: 6px; }
+  .note select {
+    font-family: var(--sans); font-size: 11px; font-weight: 600;
+    color: rgba(0,0,0,0.72); background: rgba(255,255,255,0.55);
+    border: 1px solid rgba(0,0,0,0.18); border-radius: 5px;
+    padding: 2px 4px; cursor: pointer; max-width: 96px;
+  }
+  .note::-webkit-resizer { background: rgba(0,0,0,0.25); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">CDC Design <span>// seam-ai</span></div>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <span class="hint">Drag by the bar &middot; resize from the corner &middot; pick a font &middot; auto-saves</span>
+    <button class="btn" id="addNote">+ Add note</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <h1>Content-Defined Chunking, for re-embedding only what changed</h1>
+  <p class="lead">A proposal for making document updates cheap in our RAG pipeline. Read top to bottom; the two decisions I need from you are at the very end. Nothing is coded yet.</p>
+
+  <div class="tldr">
+    <span class="tag">In one paragraph</span>
+    <p>Embedding text costs time and money, so when a document changes we want to re-embed <strong>only the part that changed</strong>, not the whole file. The trouble is that normal "cut every N characters" chunking shifts <em>all</em> the boundaries when you insert text near the top, making everything look new. <strong>Content-Defined Chunking (CDC)</strong> fixes this by letting the <em>content itself</em> decide where chunks begin and end, so an edit only disturbs the chunks right next to it. Everything else stays byte-for-byte identical and can be reused.</p>
+  </div>
+
+  <h2><span class="num">1</span>What problem are we actually solving?</h2>
+  <p>In our pipeline, the slow and costly step is <strong>embedding</strong> — sending each piece of text to Gemini to get its vector. Reading files and hashing them locally is effectively free; the API call is not.</p>
+  <p>We already made re-ingestion smarter once: with <code>DocStoreStrategy.UPSERTS_AND_DELETE</code>, re-running <code>ingest</code> skips documents whose contents haven't changed. But that works at the <strong>whole-document level</strong> — change one line in a document and its <em>entire</em> set of chunks gets re-embedded.</p>
+  <p>CDC is the next step down: change one line, and we re-embed just the <strong>one or two chunks</strong> around that line. This proposal is about how to get there.</p>
+
+  <h2><span class="num">2</span>Why simple "fixed-size" chunking breaks</h2>
+  <p>Here is the analogy that makes it click (borrowed from the backup world, where CDC was invented):</p>
+  <blockquote>Imagine splitting a book into chapters of exactly 50 pages each. If someone inserts a single paragraph on page 2, every "chapter" after it shifts by a paragraph — so all of your 50-page boundaries now fall in different places, and the system thinks the whole book is new, even though only one paragraph changed.</blockquote>
+  <p>That is the <strong>boundary-shift problem</strong>. Watch it happen with a tiny example. We cut a fixed chunk every 3 words:</p>
+
+  <div class="example">
+    <div class="title">Fixed-size chunks — cut every 3 words</div>
+    <div class="row"><span class="lbl">before  </span>[the cat sat] [on the mat] [and it purred]</div>
+    <div class="row"><span class="lbl">after   </span>[<span class="chip diff">big</span> the cat] [sat on the] [mat and it] [purred]</div>
+    <div class="note-line bad">Inserting "big" at the front shoved every word over. All chunks differ → all must be re-embedded.</div>
+  </div>
+
+  <h2><span class="num">3</span>The CDC idea: let the content choose the cuts</h2>
+  <p>Instead of cutting at fixed positions, CDC slides a small window across the text and computes a <strong>rolling hash</strong> — a number that depends only on the bytes currently under the window. Whenever that number hits a certain pattern, we declare a <strong>cut point</strong> right there.</p>
+  <p>The crucial property: because a boundary is decided by the <em>local content</em> around it, the same content always produces a boundary in the same spot. So after an edit, the boundaries downstream <strong>re-synchronise</strong> back to where they were before. Same example, but now we cut <em>after</em> any word ending in a specific letter (pretend the rolling hash says "cut after 'sat' and 'mat'"):</p>
+
+  <div class="example">
+    <div class="title">Content-defined chunks — cut where content says (&bull; = a cut point)</div>
+    <div class="row"><span class="lbl">before  </span>the cat sat &bull; on the mat &bull; and it purred</div>
+    <div class="row"><span class="lbl">chunks  </span>[the cat sat] <span class="chip same">[on the mat]</span> <span class="chip same">[and it purred]</span></div>
+    <div class="row"> </div>
+    <div class="row"><span class="lbl">after   </span><span class="chip diff">big</span> the cat sat &bull; on the mat &bull; and it purred</div>
+    <div class="row"><span class="lbl">chunks  </span>[big the cat sat] <span class="chip same">[on the mat]</span> <span class="chip same">[and it purred]</span></div>
+    <div class="note-line good">Only the first chunk changed. The "sat &bull;" and "mat &bull;" cuts are content-triggered, so they didn't move — those two chunks are identical and get reused (no embedding).</div>
+  </div>
+
+  <p class="dim">This is exactly the trick that <code>rsync</code>, <code>restic</code>, and <code>borg</code> use to back up a 1&nbsp;GB file after a one-byte change without re-uploading the whole gigabyte.</p>
+
+  <h2><span class="num">4</span>Our one adaptation: chunk the <em>units</em>, not raw bytes</h2>
+  <p>Classic CDC runs the rolling hash over raw <strong>bytes</strong>, so a cut can land in the middle of a word: <code>"...prioritizes drug tar"</code>. That is fine for backups, but terrible for RAG — half a sentence makes a meaningless embedding.</p>
+  <p>So we apply CDC <strong>one level up</strong>. First split the text into clean <strong>units</strong> (lines, sentences, or paragraphs — that's decision Q1 below). Hash each unit down to one number. Then run the rolling hash over that <em>sequence of unit-hashes</em>, and only ever cut <em>between</em> units.</p>
+
+  <div class="example">
+    <div class="title">The pipeline</div>
+    <div class="row">raw text   <span class="lbl">&rarr;</span>  [ unit&#8321;, unit&#8322;, unit&#8323;, &hellip; ]      <span class="lbl">split into clean units</span></div>
+    <div class="row">           <span class="lbl">&rarr;</span>  [ h&#8321;,   h&#8322;,   h&#8323;,   &hellip; ]      <span class="lbl">one hash per unit</span></div>
+    <div class="row">           <span class="lbl">&rarr;</span>  rolling hash over that list   <span class="lbl">cut only between units</span></div>
+    <div class="row">           <span class="lbl">&rarr;</span>  chunks = groups of whole units</div>
+  </div>
+  <p>Result: boundaries are still content-defined (they survive edits), <strong>and</strong> every chunk is made of whole sentences or lines — clean text the embedder is happy with.</p>
+
+  <h2><span class="num">5</span>How the cut is actually decided (the fast version)</h2>
+  <p>We don't need the heavy math from the original Rabin-fingerprint method. The modern approach, <strong>FastCDC</strong>, uses a tiny, fast rolling hash called a <em>Gear hash</em>:</p>
+  <div class="example">
+    <div class="title">Gear rolling hash — one step per unit</div>
+    <div class="row">hash = (hash &lt;&lt; 1) + GEAR[ unitHash &amp; 0xFF ]    <span class="lbl">GEAR = fixed table of 256 random numbers</span></div>
+    <div class="row">cut here if (hash &amp; mask) == 0               <span class="lbl">mask sets the average chunk size</span></div>
+  </div>
+  <p>Three guard rails keep chunk sizes sane:</p>
+  <ul>
+    <li><strong>min size</strong> — never cut too soon (avoids a flood of tiny chunks).</li>
+    <li><strong>average size</strong> — the target most chunks cluster around, set by the <code>mask</code>.</li>
+    <li><strong>max size</strong> — force a cut if we've gone too long (avoids giant chunks).</li>
+  </ul>
+  <p class="dim">FastCDC adds one more trick called <em>normalized chunking</em>: use a stricter mask before the target size and a looser one after, which tightens the size distribution. Nice-to-have, not essential for v1.</p>
+
+  <h2><span class="num">6</span>The plan: how a re-ingest would work</h2>
+  <p>We keep a small bookkeeping file — a <strong>manifest</strong> — next to the docstore, listing the chunk hashes we currently have for each file:</p>
+  <div class="example">
+    <div class="title">./storage/cdc-manifest.json</div>
+    <div class="row">{ <span class="chip same">"documents/fory.md"</span>:   ["a3f9&hellip;", "7c21&hellip;", "e0b4&hellip;"],</div>
+    <div class="row">&nbsp;&nbsp;<span class="chip same">"documents/README.md"</span>: ["11ab&hellip;", "98fe&hellip;"] }</div>
+  </div>
+  <p>When a file is re-ingested:</p>
+  <ol>
+    <li>Split &rarr; CDC &rarr; get the new list of chunks, and <code>sha256()</code> each one.</li>
+    <li>Compare the new hashes against the old ones in the manifest:
+      <ul>
+        <li><strong>new hash, not in manifest</strong> &rarr; embed it, upsert to Qdrant</li>
+        <li><strong>old hash, gone now</strong> &rarr; delete that vector from Qdrant</li>
+        <li><strong>hash in both</strong> &rarr; do nothing — reuse the existing vector (free)</li>
+      </ul>
+    </li>
+    <li>Save the new hash list back to the manifest.</li>
+  </ol>
+  <div class="callout">
+    <span class="tag">Nice side effect</span>
+    <p>We make the <strong>chunk's content hash its ID in Qdrant</strong> (as a UUID derived from the sha256). That gives us stable deletes, automatic de-duplication (identical text anywhere = same ID), and a trivial "do we already have this?" check — all for free.</p>
+  </div>
+
+  <h3>What changes in the codebase</h3>
+  <table>
+    <tr><th>File</th><th>Role</th></tr>
+    <tr><td><code>cdc.ts</code></td><td>pure functions: <code>splitUnits</code>, <code>gearHash</code>, <code>fastCDC</code>, <code>chunkId</code></td></tr>
+    <tr><td><code>manifest.ts</code></td><td>load / save the JSON manifest</td></tr>
+    <tr><td><code>ingest.ts</code></td><td>orchestrates: chunk &rarr; diff &rarr; embed new &rarr; upsert / delete in Qdrant</td></tr>
+  </table>
+  <p><code>query.ts</code> and <code>chat.ts</code> <strong>don't change at all</strong> — they just read whatever vectors are in Qdrant. One trade-off: this path goes around LlamaIndex's high-level <code>fromDocuments()</code> (which assigns its own random IDs), so we manage IDs ourselves.</p>
+
+  <h2><span class="num">7</span>Honest trade-offs before we build it</h2>
+  <div class="callout warn">
+    <span class="tag">Worth weighing</span>
+    <p style="margin-top:6px;"><strong>1. The payoff is small on today's files.</strong> Our markdown reader already splits each <code>.md</code> into ~30 small section-sized documents, and upsert already re-embeds only the changed sections. CDC's real win shows up with <em>large single documents</em> that change in one spot (big <code>.txt</code>, source code, long PDFs). On small sections, CDC &asymp; what we already have.</p>
+    <p style="margin-top:8px;"><strong>2. A changed chunk is never free.</strong> CDC shrinks the blast radius to the 1&ndash;2 chunks around an edit — but those still get re-embedded. It minimizes work, it can't eliminate it.</p>
+    <p style="margin-top:8px;"><strong>3. Splitting into units is its own little problem.</strong> Naive <code>split(".")</code> trips on <code>e.g.</code>, <code>3.5</code>, and URLs. The unit choice (Q1) directly affects chunk quality.</p>
+    <p style="margin-top:8px;"><strong>4. We step off the framework's paved road.</strong> Managing IDs and vectors by hand means losing some of LlamaIndex's built-in bookkeeping. Fine for a learning project, but a real divergence.</p>
+  </div>
+
+  <h2><span class="num">8</span>What I need you to decide</h2>
+
+  <div class="qcard">
+    <h3>Q1 &mdash; What should a "unit" be?</h3>
+    <p class="dim" style="margin-top:0;">This is the thing we split into before chunking. It sets how clean the chunk boundaries are.</p>
+    <div class="opt">
+      <div class="lab">Lines / blocks <span class="rec">my recommendation</span></div>
+      <div class="desc">Split on newlines and markdown blocks. Zero dependencies, ideal for <code>.md</code> and code-like docs, and edits are already line-localized. Simplest choice that's correct.</div>
+    </div>
+    <div class="opt">
+      <div class="lab">Sentences</div>
+      <div class="desc">Better for prose-heavy paragraphs, but needs a sentence splitter that handles abbreviations, decimals, and URLs without breaking.</div>
+    </div>
+    <div class="opt">
+      <div class="lab">Paragraphs</div>
+      <div class="desc">Coarsest — fewest chunks, but a one-line edit re-embeds the whole paragraph around it.</div>
+    </div>
+  </div>
+
+  <div class="qcard">
+    <h3>Q2 &mdash; Build it now, or refine the design first?</h3>
+    <div class="opt">
+      <div class="lab">Implement in TypeScript now</div>
+      <div class="desc">Build <code>cdc.ts</code> + <code>manifest.ts</code>, rewire <code>ingest.ts</code> to chunk&ndash;diff&ndash;embed&ndash;upsert, and prove it with an "edit one line" test that shows only 1&ndash;2 chunks re-embed.</div>
+    </div>
+    <div class="opt">
+      <div class="lab">Refine the design first</div>
+      <div class="desc">Hold off on code. Tune parameters (chunk sizes, ID scheme, manifest format) or walk through more examples before committing.</div>
+    </div>
+  </div>
+
+  <div class="sources">
+    <h3>Sources this proposal draws on</h3>
+    <ul>
+      <li><a href="https://joshleeb.com/posts/content-defined-chunking.html" target="_blank">Intro to Content-Defined Chunking</a> &mdash; the boundary-shift problem and rolling-hash intuition</li>
+      <li><a href="https://plakar.io/posts/2025-07-11/introducing-go-cdc-chunkers-chunk-and-deduplicate-everything/" target="_blank">Plakar: chunk and deduplicate everything</a> &mdash; the book/chapters analogy and min/avg/max sizing</li>
+      <li><a href="https://www.usenix.org/system/files/conference/atc16/atc16-paper-xia.pdf" target="_blank">FastCDC (USENIX ATC '16)</a> &mdash; the Gear hash and normalized chunking, the original paper</li>
+    </ul>
+  </div>
+
+  <p class="footer-note">seam-ai &mdash; CDC design draft &middot; for analysis only, nothing committed to the pipeline yet</p>
+</div>
+
+<script>
+  // ---------- floating, draggable, resizable sticky notes ----------
+  const STORAGE_KEY = "cdc_notes_v1";
+  const COLORS = ["#ffe27a", "#ffd1a6", "#bdf0c8", "#bcdcff", "#f3c2f0"];
+  let topZ = 1000;
+
+  // Three selectable fonts per note. All system stacks, so the file stays
+  // fully offline (no web-font downloads).
+  const FONTS = {
+    technical: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace',
+    cursive: '"Segoe Script", "Bradley Hand", "Brush Script MT", "Snell Roundhand", cursive',
+    serif: 'Georgia, "Iowan Old Style", Palatino, "Times New Roman", serif',
+  };
+  const FONT_LABELS = { technical: "Technical", cursive: "Cursive", serif: "Serif" };
+
+  // Debounce saves so dragging/resizing/fast typing doesn't hammer localStorage.
+  let saveTimer = null;
+  function debouncedSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNotes, 200);
+  }
+
+  function loadNotes() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+    catch { return []; }
+  }
+  function saveNotes() {
+    const data = [...document.querySelectorAll(".note")].map(n => ({
+      text: n.querySelector("textarea").value,
+      left: n.style.left,
+      top: n.style.top,
+      width: n.style.width || n.offsetWidth + "px",
+      height: n.style.height || n.offsetHeight + "px",
+      color: n.style.background,
+      font: n.dataset.font || "technical",
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  function makeNote({ text = "", left, top, width, height, color, font = "technical" } = {}) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.style.background = color || COLORS[Math.floor(Math.random() * COLORS.length)];
+    // default spawn near top-right, slightly cascaded
+    const count = document.querySelectorAll(".note").length;
+    note.style.left = left || (window.innerWidth - 290 - count * 14) + "px";
+    note.style.top = top || (90 + count * 18) + "px";
+    if (width) note.style.width = width;
+    if (height) note.style.height = height;
+    note.style.zIndex = ++topZ;
+    note.dataset.font = font;
+
+    const bar = document.createElement("div");
+    bar.className = "note-bar";
+    const grip = document.createElement("span");
+    grip.className = "grip";
+    grip.innerHTML = "&#8942;&#8942; drag";
+
+    const right = document.createElement("div");
+    right.className = "note-right";
+
+    // per-note font picker
+    const sel = document.createElement("select");
+    sel.title = "Font";
+    for (const key of Object.keys(FONTS)) {
+      const o = document.createElement("option");
+      o.value = key;
+      o.textContent = FONT_LABELS[key];
+      sel.appendChild(o);
+    }
+    sel.value = font;
+
+    const x = document.createElement("button");
+    x.className = "note-x";
+    x.textContent = "×";
+    x.title = "Delete note";
+
+    right.appendChild(sel);
+    right.appendChild(x);
+    bar.appendChild(grip);
+    bar.appendChild(right);
+
+    const ta = document.createElement("textarea");
+    ta.placeholder = "Type a note... (drag the bar to move me, drag the corner to resize)";
+    ta.value = text;
+
+    note.appendChild(bar);
+    note.appendChild(ta);
+    document.body.appendChild(note);
+
+    // apply the chosen font to the writing area
+    ta.style.fontFamily = FONTS[font];
+
+    // bring to front when interacting
+    const toFront = () => { note.style.zIndex = ++topZ; };
+    note.addEventListener("pointerdown", toFront);
+
+    // font switcher — stopPropagation so using the dropdown doesn't start a drag
+    sel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    sel.addEventListener("change", () => {
+      note.dataset.font = sel.value;
+      ta.style.fontFamily = FONTS[sel.value];
+      saveNotes();
+    });
+
+    // delete — stopPropagation so clicking × doesn't start a drag
+    x.addEventListener("pointerdown", (e) => e.stopPropagation());
+    x.addEventListener("click", () => { note.remove(); saveNotes(); });
+
+    // persist on typing
+    ta.addEventListener("input", debouncedSave);
+
+    // persist size changes from dragging the bottom-right resize handle
+    const ro = new ResizeObserver(() => debouncedSave());
+    ro.observe(note);
+
+    // ---- drag logic (pointer events: works for mouse + touch) ----
+    let dragging = false, offX = 0, offY = 0;
+    bar.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      const rect = note.getBoundingClientRect();
+      offX = e.clientX - rect.left;
+      offY = e.clientY - rect.top;
+      bar.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      let nx = e.clientX - offX;
+      let ny = e.clientY - offY;
+      // clamp so the note never fully leaves the screen
+      const w = note.offsetWidth, h = note.offsetHeight;
+      nx = Math.max(-w + 60, Math.min(nx, window.innerWidth - 60));
+      ny = Math.max(0, Math.min(ny, window.innerHeight - 36));
+      note.style.left = nx + "px";
+      note.style.top = ny + "px";
+    });
+    const endDrag = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      try { bar.releasePointerCapture(e.pointerId); } catch {}
+      saveNotes();
+    };
+    bar.addEventListener("pointerup", endDrag);
+    bar.addEventListener("pointercancel", endDrag);
+
+    return note;
+  }
+
+  document.getElementById("addNote").addEventListener("click", () => {
+    makeNote();
+    saveNotes();
+  });
+
+  // restore notes from last session
+  const saved = loadNotes();
+  if (saved.length) {
+    saved.forEach(makeNote);
+  } else {
+    // friendly starter note on first open
+    makeNote({ text: "Analysis scratchpad.\nDrag me by the bar, resize from the corner.\n\nQ1 unit: ?\nQ2 build now: ?" });
+  }
+</script>
+</body>
+</html>
